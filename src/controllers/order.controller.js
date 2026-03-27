@@ -1,0 +1,135 @@
+import Order from "../models/order.model.js";
+import Buyer from "../models/buyer.model.js";
+
+// Create a new order
+export const createOrder = async (req, res) => {
+  try {
+    const order = new Order(req.body);
+    const savedOrder = await order.save();
+    res.status(201).json(savedOrder);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Get all orders with pagination and populated buyer/flower details
+export const getOrders = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+    let query = {};
+
+    if (req.query.paid !== undefined && req.query.paid !== '') {
+      query.paid = req.query.paid === 'true';
+    }
+
+    if (req.query.settled !== undefined && req.query.settled !== '') {
+      query.settled = req.query.settled === 'true';
+    }
+
+    if (req.query.search) {
+      const matchingBuyers = await Buyer.find({
+        $or: [
+          { name: { $regex: req.query.search, $options: 'i' } },
+          { businessName: { $regex: req.query.search, $options: 'i' } }
+        ]
+      }).select('_id');
+      
+      const buyerIds = matchingBuyers.map(b => b._id);
+      
+      query.$or = [
+        { orderId: { $regex: req.query.search, $options: 'i' } },
+        { buyer: { $in: buyerIds } }
+      ];
+    }
+
+    const total = await Order.countDocuments(query);
+    const orders = await Order.find(query)
+      .populate("buyer")
+      .populate("items.flower")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    res.status(200).json({
+      data: orders,
+      page,
+      pages: Math.ceil(total / limit),
+      total
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Get single order by MongoDB _id or orderId
+export const getOrderById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let query = {};
+
+    // Check if id is a valid ObjectId
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      query = { _id: id };
+    } else {
+      query = { orderId: id };
+    }
+
+    const order = await Order.findOne(query)
+      .populate("buyer")
+      .populate("items.flower");
+
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    res.status(200).json(order);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Update order by MongoDB _id or orderId
+export const updateOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let query = {};
+
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      query = { _id: id };
+    } else {
+      query = { orderId: id };
+    }
+
+    const order = await Order.findOneAndUpdate(query, req.body, { new: true, runValidators: true })
+      .populate("buyer")
+      .populate("items.flower");
+
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    res.status(200).json(order);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Delete order by MongoDB _id or orderId
+export const deleteOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let query = {};
+
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      query = { _id: id };
+    } else {
+      query = { orderId: id };
+    }
+
+    const order = await Order.findOneAndDelete(query);
+
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    res.status(200).json({ message: "Order deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
