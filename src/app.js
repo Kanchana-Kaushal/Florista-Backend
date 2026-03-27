@@ -1,5 +1,8 @@
 import express from "express";
 import cors from "cors";
+import dotenv from "dotenv";
+
+dotenv.config();
 import buyerRoutes from "./routes/buyer.routes.js";
 import flowerRoutes from "./routes/flower.routes.js";
 import orderRoutes from "./routes/order.routes.js";
@@ -19,7 +22,10 @@ const limiter = rateLimit({
 
 // Middlewares
 app.use(limiter);
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL,
+  credentials: true,
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
