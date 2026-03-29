@@ -27,25 +27,35 @@ export const getDashboardStats = async (req, res) => {
       }
     ];
 
+    const orderLevelStats = await Order.aggregate([
+      { $match: { date: { $gte: startOfMonth, $lte: endOfMonth } } },
+      { $group: { _id: null, totalDiscount: { $sum: "$discount" } } }
+    ]);
+    const totalDiscount = orderLevelStats.length > 0 ? orderLevelStats[0].totalDiscount || 0 : 0;
+
     const statsResult = await Order.aggregate(monthlyStatsPipeline);
     const totalSales = statsResult.length > 0 ? statsResult[0].totalSales : 0;
     const totalCost = statsResult.length > 0 ? statsResult[0].totalCost : 0;
-    const totalProfit = totalSales - totalCost;
+    const totalProfit = (totalSales - totalCost) - totalDiscount;
 
     const fulfilledOrders = await Order.countDocuments({ 
       date: { $gte: startOfMonth, $lte: endOfMonth }, 
       settled: true 
     });
     
-    const unsettledOrders = await Order.countDocuments({ 
-      date: { $gte: startOfMonth, $lte: endOfMonth }, 
-      settled: false 
-    });
+    const unsettledStats = await Order.aggregate([
+      { $match: { date: { $gte: startOfMonth, $lte: endOfMonth }, settled: false } },
+      { $group: { _id: null, count: { $sum: 1 }, value: { $sum: "$totalAmount" } } }
+    ]);
+    const unsettledOrders = unsettledStats.length > 0 ? unsettledStats[0].count : 0;
+    const unsettledValue = unsettledStats.length > 0 ? unsettledStats[0].value : 0;
 
-    const unpaidOrders = await Order.countDocuments({ 
-      date: { $gte: startOfMonth, $lte: endOfMonth }, 
-      paid: false 
-    });
+    const unpaidStats = await Order.aggregate([
+      { $match: { date: { $gte: startOfMonth, $lte: endOfMonth }, paid: false } },
+      { $group: { _id: null, count: { $sum: 1 }, value: { $sum: "$totalAmount" } } }
+    ]);
+    const unpaidOrders = unpaidStats.length > 0 ? unpaidStats[0].count : 0;
+    const unpaidValue = unpaidStats.length > 0 ? unpaidStats[0].value : 0;
 
     // 2. Top 5 Buyers (Lifetime buys)
     const topBuyersPipeline = [
@@ -215,20 +225,74 @@ export const getDashboardStats = async (req, res) => {
       settled: o.settled
     }));
 
+    // 7. Top Debtors (Lifetime unpaid/unsettled)
+    const topDebtorsPipeline = [
+      { $match: { $or: [{ paid: false }, { settled: false }] } },
+      {
+        $group: {
+          _id: "$buyer",
+          totalOwed: { $sum: "$totalAmount" },
+          debtOrdersCount: { $sum: 1 }
+        }
+      },
+      { $sort: { totalOwed: -1 } },
+      { $limit: 6 },
+      {
+        $lookup: {
+          from: "buyers",
+          localField: "_id",
+          foreignField: "_id",
+          as: "buyerInfo"
+        }
+      },
+      { $unwind: { path: "$buyerInfo", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          name: "$buyerInfo.name",
+          businessName: "$buyerInfo.businessName",
+          telephone: "$buyerInfo.telephone",
+          totalOwed: 1,
+          debtOrdersCount: 1
+        }
+      }
+    ];
+    const topDebtors = await Order.aggregate(topDebtorsPipeline);
+
+    // 8. Daily Sales (Selected Month)
+    const dailySalesPipeline = [
+      { $match: { date: { $gte: startOfMonth, $lte: endOfMonth } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+          totalSales: { $sum: "$totalAmount" }
+        }
+      },
+      { $sort: { "_id": 1 } }
+    ];
+    const dailySalesRaw = await Order.aggregate(dailySalesPipeline);
+    const dailySales = dailySalesRaw.map(d => ({ date: d._id, totalSales: d.totalSales }));
+
     res.status(200).json({
       timeframe: { startOfMonth, endOfMonth },
       overview: {
         totalSales,
+        totalCost,
         totalProfit,
+        totalDiscount,
         fulfilledOrders,
         unsettledOrders,
-        unpaidOrders
+        unpaidOrders,
+        unsettledValue,
+        unpaidValue
       },
       historicalAverages,
       topBuyers,
       topFlowers,
       salesByLocation,
-      recentActivity
+      recentActivity,
+      topDebtors,
+      dailySales
     });
 
   } catch (error) {
