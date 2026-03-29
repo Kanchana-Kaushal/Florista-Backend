@@ -259,19 +259,23 @@ export const getDashboardStats = async (req, res) => {
     ];
     const topDebtors = await Order.aggregate(topDebtorsPipeline);
 
-    // 8. Daily Sales (Selected Month)
-    const dailySalesPipeline = [
-      { $match: { date: { $gte: startOfMonth, $lte: endOfMonth } } },
+    // 8. Monthly Sales (Last 12 Months)
+    const twelveMonthsAgo = new Date(endOfMonth.getFullYear(), endOfMonth.getMonth() - 11, 1);
+    const monthlySalesPipeline = [
+      { $match: { date: { $gte: twelveMonthsAgo, $lte: endOfMonth } } },
       {
         $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+          _id: { year: { $year: "$date" }, month: { $month: "$date" } },
           totalSales: { $sum: "$totalAmount" }
         }
       },
-      { $sort: { "_id": 1 } }
+      { $sort: { "_id.year": 1, "_id.month": 1 } }
     ];
-    const dailySalesRaw = await Order.aggregate(dailySalesPipeline);
-    const dailySales = dailySalesRaw.map(d => ({ date: d._id, totalSales: d.totalSales }));
+    const monthlySalesRaw = await Order.aggregate(monthlySalesPipeline);
+    const monthlySales = monthlySalesRaw.map(m => ({
+      date: new Date(m._id.year, m._id.month - 1, 1).toISOString(),
+      totalSales: m.totalSales
+    }));
 
     res.status(200).json({
       timeframe: { startOfMonth, endOfMonth },
@@ -292,7 +296,7 @@ export const getDashboardStats = async (req, res) => {
       salesByLocation,
       recentActivity,
       topDebtors,
-      dailySales
+      monthlySales
     });
 
   } catch (error) {
