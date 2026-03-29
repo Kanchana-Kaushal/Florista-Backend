@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { getNextSequence } from "./counter.model.js";
 
 const flowerSchema = new mongoose.Schema(
   {
@@ -27,16 +28,11 @@ const flowerSchema = new mongoose.Schema(
   }
 );
 
-// Pre-save hook to auto generate flowerId like F001, F002
+// ── Atomic sequential ID (fixes race condition) ──────────────────────────────
 flowerSchema.pre("save", async function () {
   if (!this.flowerId) {
-    const lastFlower = await this.constructor.findOne({}, {}, { sort: { "createdAt": -1 } });
-    if (lastFlower && lastFlower.flowerId && lastFlower.flowerId.startsWith("F")) {
-      const lastIdNumber = parseInt(lastFlower.flowerId.substring(1), 10);
-      this.flowerId = `F${(lastIdNumber + 1).toString().padStart(3, "0")}`;
-    } else {
-      this.flowerId = "F001";
-    }
+    const seq = await getNextSequence("flower");
+    this.flowerId = `F${seq.toString().padStart(3, "0")}`;
   }
 });
 

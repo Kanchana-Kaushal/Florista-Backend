@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { getNextSequence } from "./counter.model.js";
 
 const orderItemSchema = new mongoose.Schema({
   flower: {
@@ -24,7 +25,7 @@ const orderItemSchema = new mongoose.Schema({
     required: true,
     min: 1,
     default: 1,
-  }
+  },
 });
 
 const orderSchema = new mongoose.Schema(
@@ -49,34 +50,42 @@ const orderSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
-    date: {
-      type: Date,
-      default: Date.now,
-    },
     paid: {
       type: Boolean,
       default: false,
+    },
+    // Timestamp set automatically when paid is first set to true
+    paidDate: {
+      type: Date,
+      default: null,
     },
     settled: {
       type: Boolean,
       default: false,
     },
+    // Timestamp set automatically when settled is first set to true
+    settledDate: {
+      type: Date,
+      default: null,
+    },
   },
   {
-    timestamps: true,
-  }
+    timestamps: true, // provides createdAt + updatedAt — use createdAt as the order date
+  },
 );
 
-// Pre-save hook to auto generate orderId like O001, O002
+// ── Indexes for fast aggregation queries ──────────────────────────────────────
+orderSchema.index({ createdAt: 1 });
+orderSchema.index({ createdAt: -1 });
+orderSchema.index({ buyer: 1 });
+orderSchema.index({ paid: 1, settled: 1 });
+orderSchema.index({ settled: 1 });
+
+// ── Atomic sequential ID (fixes race condition) ───────────────────────────────
 orderSchema.pre("save", async function () {
   if (!this.orderId) {
-    const lastOrder = await this.constructor.findOne({}, {}, { sort: { "createdAt": -1 } });
-    if (lastOrder && lastOrder.orderId && lastOrder.orderId.startsWith("O")) {
-      const lastIdNumber = parseInt(lastOrder.orderId.substring(1), 10);
-      this.orderId = `O${(lastIdNumber + 1).toString().padStart(3, "0")}`;
-    } else {
-      this.orderId = "O001";
-    }
+    const seq = await getNextSequence("order");
+    this.orderId = `O${seq.toString().padStart(3, "0")}`;
   }
 });
 

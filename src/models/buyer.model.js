@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { getNextSequence } from './counter.model.js';
 
 const buyerSchema = new mongoose.Schema(
   {
@@ -32,16 +33,11 @@ const buyerSchema = new mongoose.Schema(
   }
 );
 
-// Pre-save hook to auto generate buyerId like B001, B002
+// ── Atomic sequential ID (fixes race condition) ──────────────────────────────
 buyerSchema.pre('save', async function () {
   if (!this.buyerId) {
-    const lastBuyer = await this.constructor.findOne({}, {}, { sort: { 'createdAt': -1 } });
-    if (lastBuyer && lastBuyer.buyerId && lastBuyer.buyerId.startsWith('B')) {
-      const lastIdNumber = parseInt(lastBuyer.buyerId.substring(1), 10);
-      this.buyerId = `B${(lastIdNumber + 1).toString().padStart(3, '0')}`;
-    } else {
-      this.buyerId = 'B001';
-    }
+    const seq = await getNextSequence('buyer');
+    this.buyerId = `B${seq.toString().padStart(3, '0')}`;
   }
 });
 

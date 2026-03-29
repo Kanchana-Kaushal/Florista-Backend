@@ -20,14 +20,22 @@ export const getOrders = async (req, res) => {
     const skip = (page - 1) * limit;
     let query = {};
 
+    // Filter by payment status
     if (req.query.paid !== undefined && req.query.paid !== '') {
       query.paid = req.query.paid === 'true';
     }
 
+    // Filter by settlement status
     if (req.query.settled !== undefined && req.query.settled !== '') {
       query.settled = req.query.settled === 'true';
     }
 
+    // Filter by specific buyer ObjectId (#8 — buyer order history)
+    if (req.query.buyerObjectId) {
+      query.buyer = req.query.buyerObjectId;
+    }
+
+    // Text search across orderId and buyer name/businessName
     if (req.query.search) {
       const matchingBuyers = await Buyer.find({
         $or: [
@@ -35,9 +43,9 @@ export const getOrders = async (req, res) => {
           { businessName: { $regex: req.query.search, $options: 'i' } }
         ]
       }).select('_id');
-      
+
       const buyerIds = matchingBuyers.map(b => b._id);
-      
+
       query.$or = [
         { orderId: { $regex: req.query.search, $options: 'i' } },
         { buyer: { $in: buyerIds } }
@@ -69,7 +77,6 @@ export const getOrderById = async (req, res) => {
     const { id } = req.params;
     let query = {};
 
-    // Check if id is a valid ObjectId
     if (id.match(/^[0-9a-fA-F]{24}$/)) {
       query = { _id: id };
     } else {
@@ -89,6 +96,7 @@ export const getOrderById = async (req, res) => {
 };
 
 // Update order by MongoDB _id or orderId
+// Automatically stamps paidDate and settledDate when those flags first become true
 export const updateOrder = async (req, res) => {
   try {
     const { id } = req.params;
@@ -100,11 +108,28 @@ export const updateOrder = async (req, res) => {
       query = { orderId: id };
     }
 
-    const order = await Order.findOneAndUpdate(query, req.body, { new: true, runValidators: true })
+    // Fetch current state so we can decide whether to stamp timestamps
+    const existing = await Order.findOne(query);
+    if (!existing) return res.status(404).json({ error: "Order not found" });
+
+    const updateBody = { ...req.body };
+
+    // Stamp paidDate only when transitioning from unpaid → paid (#2)
+    if (updateBody.paid === true && !existing.paid) {
+      updateBody.paidDate = new Date();
+    }
+
+    // Stamp settledDate only when transitioning from unsettled → settled (#2)
+    if (updateBody.settled === true && !existing.settled) {
+      updateBody.settledDate = new Date();
+    }
+
+    const order = await Order.findOneAndUpdate(query, updateBody, {
+      new: true,
+      runValidators: true,
+    })
       .populate("buyer")
       .populate("items.flower");
-
-    if (!order) return res.status(404).json({ error: "Order not found" });
 
     res.status(200).json(order);
   } catch (error) {
