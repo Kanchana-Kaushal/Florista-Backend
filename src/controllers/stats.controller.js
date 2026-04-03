@@ -203,6 +203,17 @@ export const getDashboardStats = async (req, res) => {
               },
             },
           ],
+
+          // Daily Activity Heatmap
+          dailyActivity: [
+            {
+              $group: {
+                _id: { day: { $dayOfMonth: "$createdAt" } },
+                dailyAmount: { $sum: "$totalAmount" },
+              },
+            },
+            { $sort: { "_id.day": 1 } },
+          ],
         },
       },
     ]);
@@ -320,9 +331,9 @@ export const getDashboardStats = async (req, res) => {
             },
           ],
 
-          // Outstanding debtors (unpaid OR unsettled)
+          // Outstanding debtors (unpaid only)
           topDebtors: [
-            { $match: { $or: [{ paid: false }, { settled: false }] } },
+            { $match: { paid: false } },
             {
               $group: {
                 _id: "$buyer",
@@ -455,6 +466,7 @@ export const getDashboardStats = async (req, res) => {
       topFlowers: monthlyFacetResult.topFlowers,
 
       salesByLocation: monthlyFacetResult.salesByLocation,
+      dailyActivity: monthlyFacetResult.dailyActivity.map(d => ({ day: d._id.day, amount: d.dailyAmount })),
       recentActivity,
       topDebtors: lifetimeFacetResult.topDebtors,
       monthlySales,

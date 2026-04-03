@@ -56,7 +56,7 @@ export const getOrders = async (req, res) => {
     const orders = await Order.find(query)
       .populate("buyer")
       .populate("items.flower")
-      .sort({ createdAt: -1 })
+      .sort({ paid: 1, settled: 1, createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
