@@ -1,4 +1,5 @@
 import Order from "../models/order.model.js";
+import Flower from "../models/flower.model.js";
 
 export const getDashboardStats = async (req, res) => {
   try {
@@ -473,6 +474,118 @@ export const getDashboardStats = async (req, res) => {
     });
   } catch (error) {
     console.error("Stats error:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getFlowerSalesStats = async (req, res) => {
+  try {
+    // 1. Fetch all flowers in inventory
+    const allFlowers = await Flower.find().lean();
+    
+    // 2. Perform aggregation grouped by flower and year/month
+    const salesGroup = await Order.aggregate([
+      // Unwind items array
+      { $unwind: "$items" },
+      // Match items that are standard flowers (ref to Flower exists)
+      { $match: { "items.flower": { $exists: true, $ne: null } } },
+      // Group by flower, year, month
+      {
+        $group: {
+          _id: {
+            flower: "$items.flower",
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" }
+          },
+          qtySold: { $sum: "$items.qty" },
+          revenue: { $sum: { $multiply: ["$items.price", "$items.qty"] } },
+          cost: { $sum: { $multiply: ["$items.cost", "$items.qty"] } }
+        }
+      }
+    ]);
+
+    // 3. Generate last 12 calendar months list (from this month backwards)
+    const monthsList = [];
+    const now = new Date();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = d.getMonth() + 1; // 1-indexed
+      // e.g. "May 26"
+      const label = d.toLocaleString("default", { month: "short" }) + " " + String(year).slice(-2);
+      monthsList.push({
+        year,
+        month,
+        label,
+        key: `${year}-${month}`
+      });
+    }
+
+    // 4. Map aggregation results into flowers Map
+    const salesMap = {};
+    salesGroup.forEach(item => {
+      const flowerId = item._id.flower.toString();
+      const year = item._id.year;
+      const month = item._id.month;
+      const key = `${year}-${month}`;
+
+      if (!salesMap[flowerId]) {
+        salesMap[flowerId] = {
+          allTime: { qty: 0, revenue: 0, profit: 0 },
+          monthly: {}
+        };
+        monthsList.forEach(m => {
+          salesMap[flowerId].monthly[m.key] = { qty: 0, revenue: 0, profit: 0 };
+        });
+      }
+
+      const itemProfit = item.revenue - item.cost;
+
+      // Accumulate all-time (lifetime) sales
+      salesMap[flowerId].allTime.qty += item.qtySold;
+      salesMap[flowerId].allTime.revenue += item.revenue;
+      salesMap[flowerId].allTime.profit += itemProfit;
+
+      // Accumulate monthly sales if within the last 12 months
+      if (salesMap[flowerId].monthly[key] !== undefined) {
+        salesMap[flowerId].monthly[key].qty = item.qtySold;
+        salesMap[flowerId].monthly[key].revenue = item.revenue;
+        salesMap[flowerId].monthly[key].profit = itemProfit;
+      }
+    });
+
+    // 5. Build final payload by merging allFlowers with their sales statistics
+    const flowerSales = allFlowers.map(flower => {
+      const idStr = flower._id.toString();
+      const stats = salesMap[idStr] || {
+        allTime: { qty: 0, revenue: 0, profit: 0 },
+        monthly: {}
+      };
+
+      // Ensure empty months are fully filled with 0s
+      if (Object.keys(stats.monthly).length === 0) {
+        monthsList.forEach(m => {
+          stats.monthly[m.key] = { qty: 0, revenue: 0, profit: 0 };
+        });
+      }
+
+      return {
+        _id: flower._id,
+        flowerId: flower.flowerId,
+        name: flower.name,
+        costPrice: flower.costPrice,
+        sellingPrice: flower.sellingPrice,
+        allTime: stats.allTime,
+        monthly: stats.monthly
+      };
+    });
+
+    res.status(200).json({
+      monthsList,
+      flowerSales
+    });
+  } catch (error) {
+    console.error("Flower sales stats error:", error);
     res.status(500).json({ error: error.message });
   }
 };
