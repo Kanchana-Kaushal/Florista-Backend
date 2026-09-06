@@ -511,12 +511,18 @@ export const getFlowerSalesStats = async (req, res) => {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const year = d.getFullYear();
       const month = d.getMonth() + 1; // 1-indexed
-      // e.g. "May 26"
-      const label = d.toLocaleString("default", { month: "short" }) + " " + String(year).slice(-2);
+      const lastDay = new Date(year, month, 0).getDate(); // 28, 29, 30, or 31
+      const monthName = d.toLocaleString("default", { month: "short" });
+      const fullMonthName = d.toLocaleString("default", { month: "long" });
+
+      const label = `${fullMonthName} ${year}`;
+      const rangeLabel = `${monthName} 1 – ${monthName} ${lastDay}`;
+
       monthsList.push({
         year,
         month,
         label,
+        rangeLabel,
         key: `${year}-${month}`
       });
     }
